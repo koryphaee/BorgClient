@@ -1,0 +1,61 @@
+name: CreateImage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+  actions: read
+  checks: write
+  packages: write
+  issues: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: semantic release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          branch: main
+          extra_plugins: |
+            @semantic-release/git
+            @semantic-release/changelog
+
+  build:
+    runs-on: ubuntu-latest
+    needs: release
+    if: needs.release.outputs.new_release_published == 'true'
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: login to docker hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: build and push container
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          file: Dockerfile
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/borgclient:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/borgclient:${{ needs.release.outputs.new_release_version }}
